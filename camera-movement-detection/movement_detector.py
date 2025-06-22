@@ -191,3 +191,45 @@ class MovementDetector:
         
         # Analyze homography matrix
         return self._analyze_homography(homography, len(good_matches))
+    
+    def _analyze_homography(self, H: np.ndarray, num_matches: int) -> Dict:
+        """
+        Analyze homography matrix to extract movement parameters.
+        
+        Args:
+            H: 3x3 homography matrix
+            num_matches: Number of feature matches used
+            
+        Returns:
+            Dictionary with movement analysis
+        """
+        # Extract translation
+        tx, ty = H[0, 2], H[1, 2]
+        translation_magnitude = np.sqrt(tx**2 + ty**2)
+        
+        # Extract rotation (approximate)
+        rotation = np.arctan2(H[1, 0], H[0, 0]) * 180 / np.pi
+        
+        # Extract scale (approximate)
+        scale_x = np.sqrt(H[0, 0]**2 + H[1, 0]**2)
+        scale_y = np.sqrt(H[0, 1]**2 + H[1, 1]**2)
+        scale = (scale_x + scale_y) / 2
+        
+        # Calculate confidence based on translation magnitude and number of matches
+        confidence = min(translation_magnitude / 50.0, 1.0) * min(num_matches / 50.0, 1.0)
+        
+        # Determine if significant movement occurred
+        movement_detected = (
+            translation_magnitude > 10.0 or
+            abs(rotation) > 2.0 or
+            abs(scale - 1.0) > 0.1
+        )
+        
+        return {
+            'movement_detected': movement_detected,
+            'confidence': confidence,
+            'translation': (tx, ty),
+            'rotation': rotation,
+            'scale': scale,
+            'translation_magnitude': translation_magnitude
+        }
