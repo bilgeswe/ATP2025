@@ -233,3 +233,110 @@ class MovementDetector:
             'scale': scale,
             'translation_magnitude': translation_magnitude
         }
+    
+    def _classify_movement(self, feature_result: Dict) -> MovementType:
+        """
+        Classify the type of movement based on analysis results.
+        
+        Args:
+            feature_result: Results from feature matching analysis
+            
+        Returns:
+            MovementType enum value
+        """
+        if not feature_result['movement_detected']:
+            return MovementType.NONE
+        
+        translation_mag = feature_result.get('translation_magnitude', 0)
+        rotation = abs(feature_result.get('rotation', 0))
+        scale = feature_result.get('scale', 1.0)
+        
+        # Prioritize by magnitude
+        if abs(scale - 1.0) > 0.2:
+            return MovementType.SCALE
+        elif rotation > 5.0:
+            return MovementType.ROTATION
+        elif translation_mag > 20.0:
+            return MovementType.TRANSLATION
+        else:
+            return MovementType.PERSPECTIVE
+    
+    def detect_movement_sequence(self, images: List[np.ndarray]) -> List[MovementResult]:
+        """
+        Detect movement in a sequence of images.
+        
+        Args:
+            images: List of images as numpy arrays
+            
+        Returns:
+            List of MovementResult objects for each frame transition
+        """
+        if len(images) < 2:
+            return []
+        
+        results = []
+        
+        for i in range(1, len(images)):
+            result = self._detect_movement_pair(images[i-1], images[i], i)
+            results.append(result)
+        
+        return results
+    
+    def _detect_movement_pair(
+        self, 
+        img1: np.ndarray, 
+        img2: np.ndarray, 
+        frame_index: int
+    ) -> MovementResult:
+        """
+        Detect movement between two consecutive frames.
+        
+        Args:
+            img1: First image
+            img2: Second image
+            frame_index: Index of the second frame
+            
+        Returns:
+            MovementResult object
+        """
+        # Convert to grayscale
+        gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY) if len(img1.shape) == 3 else img1
+        gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY) if len(img2.shape) == 3 else img2
+        
+        # Method 1: Frame differencing
+        diff_score = self._frame_differencing(gray1, gray2)
+        
+        # Method 2: Feature matching
+        feature_result = self._feature_matching(gray1, gray2)
+        
+        # Combine results to make final decision
+        movement_detected = (
+            diff_score > self.diff_threshold or
+            feature_result['movement_detected']
+        )
+        
+        # Determine movement type and confidence
+        movement_type = self._classify_movement(feature_result)
+        confidence = max(diff_score, feature_result['confidence'])
+        
+        return MovementResult(
+            frame_index=frame_index,
+            movement_detected=movement_detected,
+            movement_type=movement_type,
+            confidence=confidence,
+            translation=feature_result.get('translation', (0.0, 0.0)),
+            rotation_angle=feature_result.get('rotation', 0.0),
+            scale_factor=feature_result.get('scale', 1.0)
+        )
+    
+    def get_movement_frames(self, results: List[MovementResult]) -> List[int]:
+        """
+        Extract frame indices where significant movement was detected.
+        
+        Args:
+            results: List of MovementResult objects
+            
+        Returns:
+            List of frame indices with detected movement
+        """
+        return [r.frame_index for r in results if r.movement_detected]
