@@ -115,7 +115,39 @@ def handle_video_upload():
     )
 
     if uploaded_file is not None:
-        st.info("Video upload functionality will be implemented in the next commit.")
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
+            tmp_file.write(uploaded_file.read())
+            video_path = tmp_file.name
+
+        try:
+            # Extract frames from video
+            with st.spinner("Extracting frames from video..."):
+                frames = extract_frames_from_video(video_path)
+
+            if frames:
+                st.success(f"Extracted {len(frames)} frames from video")
+
+                # Show video info
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Total Frames", len(frames))
+                with col2:
+                    st.metric("Frame Size", f"{frames[0].shape[1]}×{frames[0].shape[0]}")
+
+                # Display sample frames
+                display_sample_frames(frames)
+
+                # Run detection
+                if st.button("🔍 Detect Camera Movement", type="primary"):
+                    run_movement_detection(frames)
+            else:
+                st.error("Could not extract frames from video. Please check the file format.")
+
+        finally:
+            # Clean up temporary file
+            if os.path.exists(video_path):
+                os.unlink(video_path)
 
 
 def handle_image_sequence_upload():
@@ -127,7 +159,159 @@ def handle_image_sequence_upload():
     )
 
     if uploaded_file is not None:
-        st.info("Image sequence upload functionality will be implemented in the next commit.")
+        try:
+            # Extract images from ZIP
+            with st.spinner("Extracting images from ZIP file..."):
+                images = extract_images_from_zip(uploaded_file)
+
+            if images:
+                st.success(f"Loaded {len(images)} images from ZIP file")
+
+                # Show image info
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Total Images", len(images))
+                with col2:
+                    st.metric("Image Size", f"{images[0].shape[1]}×{images[0].shape[0]}")
+
+                # Display sample images
+                display_sample_frames(images)
+
+                # Run detection
+                if st.button("🔍 Detect Camera Movement", type="primary"):
+                    run_movement_detection(images)
+            else:
+                st.error("Could not load images from ZIP file. Please check the file contents.")
+
+        except Exception as e:
+            st.error(f"Error processing ZIP file: {str(e)}")
+
+
+def extract_frames_from_video(video_path: str, max_frames: int = 100) -> List[np.ndarray]:
+    """
+    Extract frames from video file.
+
+    Args:
+        video_path: Path to video file
+        max_frames: Maximum number of frames to extract
+
+    Returns:
+        List of frame arrays
+    """
+    frames = []
+    cap = cv2.VideoCapture(video_path)
+
+    try:
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        frame_interval = max(1, total_frames // max_frames)
+
+        frame_count = 0
+        while cap.isOpened() and len(frames) < max_frames:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if frame_count % frame_interval == 0:
+                frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+            frame_count += 1
+
+    finally:
+        cap.release()
+
+    return frames
+
+
+def extract_images_from_zip(zip_file) -> List[np.ndarray]:
+    """
+    Extract images from ZIP file.
+
+    Args:
+        zip_file: Uploaded ZIP file
+
+    Returns:
+        List of image arrays
+    """
+    images = []
+
+    with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+        # Get list of image files
+        image_files = [f for f in zip_ref.namelist()
+                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
+
+        # Sort files to maintain sequence
+        image_files.sort()
+
+        for file_name in image_files:
+            with zip_ref.open(file_name) as img_file:
+                # Read image
+                img_data = img_file.read()
+                img_array = np.frombuffer(img_data, np.uint8)
+                img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+                if img is not None:
+                    images.append(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+
+    return images
+
+
+def display_sample_frames(frames: List[np.ndarray], num_samples: int = 4):
+    """Display sample frames from the sequence."""
+    st.subheader("Sample Frames")
+
+    if len(frames) < num_samples:
+        num_samples = len(frames)
+
+    # Select evenly spaced frames
+    indices = np.linspace(0, len(frames) - 1, num_samples, dtype=int)
+
+    cols = st.columns(num_samples)
+    for i, idx in enumerate(indices):
+        with cols[i]:
+            st.image(frames[idx], caption=f"Frame {idx + 1}", use_column_width=True)
+
+
+def run_movement_detection(frames: List[np.ndarray]):
+    """Run movement detection on the frame sequence."""
+    if 'diff_threshold' not in st.session_state:
+        st.session_state.diff_threshold = 0.05
+    if 'feature_threshold' not in st.session_state:
+        st.session_state.feature_threshold = 0.3
+    if 'min_matches' not in st.session_state:
+        st.session_state.min_matches = 10
+
+    # Initialize detector with current settings
+    detector = MovementDetector(
+        diff_threshold=st.session_state.diff_threshold,
+        feature_threshold=st.session_state.feature_threshold,
+        min_match_count=st.session_state.min_matches
+    )
+
+    # Run detection
+    with st.spinner("Analyzing camera movement..."):
+        results = detector.detect_movement_sequence(frames)
+
+    # Store results in session state
+    st.session_state.detection_results = results
+    st.session_state.frames = frames
+
+    # Display summary
+    movement_frames = detector.get_movement_frames(results)
+
+    if movement_frames:
+        st.success(f"✅ Detected significant camera movement in {len(movement_frames)} frames")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Frames", len(frames))
+        with col2:
+            st.metric("Movement Frames", len(movement_frames))
+        with col3:
+            st.metric("Movement Percentage", f"{len(movement_frames)/len(results)*100:.1f}%")
+
+        st.info("📊 Check the **Results** tab for detailed analysis and visualizations")
+    else:
+        st.info("ℹ️ No significant camera movement detected in the sequence")
 
 
 def handle_results_tab():
