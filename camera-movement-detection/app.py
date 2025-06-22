@@ -316,7 +316,121 @@ def run_movement_detection(frames: List[np.ndarray]):
 
 def handle_results_tab():
     """Handle the results display tab."""
-    st.info("👆 Please upload and analyze content in the Upload tab first")
+    if 'detection_results' not in st.session_state:
+        st.info("👆 Please upload and analyze content in the Upload tab first")
+        return
+
+    results = st.session_state.detection_results
+    frames = st.session_state.frames
+
+    st.header("📊 Detection Results")
+
+    # Movement timeline
+    create_movement_timeline(results)
+
+    # Movement type distribution
+    create_movement_type_chart(results)
+
+    # Detailed frame analysis
+    display_movement_frames(results, frames)
+
+
+def create_movement_timeline(results: List[MovementResult]):
+    """Create a timeline visualization of movement detection."""
+    st.subheader("Movement Timeline")
+
+    frame_indices = [r.frame_index for r in results]
+    confidences = [r.confidence for r in results]
+    movement_detected = [1 if r.movement_detected else 0 for r in results]
+
+    fig = go.Figure()
+
+    # Add confidence line
+    fig.add_trace(go.Scatter(
+        x=frame_indices,
+        y=confidences,
+        mode='lines+markers',
+        name='Confidence Score',
+        line=dict(color='blue', width=2),
+        marker=dict(size=4)
+    ))
+
+    # Add movement detection markers
+    movement_frames = [r.frame_index for r in results if r.movement_detected]
+    movement_confidences = [r.confidence for r in results if r.movement_detected]
+
+    if movement_frames:
+        fig.add_trace(go.Scatter(
+            x=movement_frames,
+            y=movement_confidences,
+            mode='markers',
+            name='Movement Detected',
+            marker=dict(color='red', size=8, symbol='diamond')
+        ))
+
+    fig.update_layout(
+        title="Camera Movement Detection Timeline",
+        xaxis_title="Frame Index",
+        yaxis_title="Confidence Score",
+        height=400,
+        showlegend=True
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def create_movement_type_chart(results: List[MovementResult]):
+    """Create a chart showing distribution of movement types."""
+    st.subheader("Movement Type Distribution")
+
+    # Count movement types
+    movement_counts = {}
+    for result in results:
+        if result.movement_detected:
+            movement_type = result.movement_type.value
+            movement_counts[movement_type] = movement_counts.get(movement_type, 0) + 1
+
+    if movement_counts:
+        # Create pie chart
+        fig = px.pie(
+            values=list(movement_counts.values()),
+            names=list(movement_counts.keys()),
+            title="Types of Camera Movement Detected"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No movement types detected in the sequence")
+
+
+def display_movement_frames(results: List[MovementResult], frames: List[np.ndarray]):
+    """Display frames where movement was detected."""
+    st.subheader("Frames with Detected Movement")
+
+    movement_results = [r for r in results if r.movement_detected]
+
+    if not movement_results:
+        st.info("No frames with significant movement detected")
+        return
+
+    # Display movement frames with details
+    for i, result in enumerate(movement_results):
+        frame_idx = result.frame_index - 1  # Convert to 0-based index
+        
+        if frame_idx < len(frames):
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.image(frames[frame_idx], caption=f"Frame {result.frame_index}", use_column_width=True)
+            
+            with col2:
+                st.markdown(f"**Movement Type:** {result.movement_type.value}")
+                st.markdown(f"**Confidence:** {result.confidence:.3f}")
+                st.markdown(f"**Translation:** ({result.translation[0]:.1f}, {result.translation[1]:.1f})")
+                st.markdown(f"**Rotation:** {result.rotation_angle:.1f}°")
+                st.markdown(f"**Scale:** {result.scale_factor:.3f}")
+        
+        if i < len(movement_results) - 1:
+            st.markdown("---")
 
 
 def handle_about_tab():
