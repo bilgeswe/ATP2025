@@ -93,3 +93,6 @@ Imagine you are tasked with building a component for a smart camera system. Your
 ---
 
 **Good luck! Show us your best hands-on AI skills!**
+
+
+Here's the result: https://atp2025-camera-movement-detection.streamlit.app/
