@@ -124,3 +124,70 @@ class MovementDetector:
         total_pixels = thresh.shape[0] * thresh.shape[1]
         
         return changed_pixels / total_pixels
+    
+    def _feature_matching(self, img1: np.ndarray, img2: np.ndarray) -> Dict:
+        """
+        Detect movement using feature matching and homography.
+        
+        Args:
+            img1: First grayscale image
+            img2: Second grayscale image
+            
+        Returns:
+            Dictionary with movement analysis results
+        """
+        # Detect keypoints and descriptors
+        kp1, des1 = self.orb.detectAndCompute(img1, None)
+        kp2, des2 = self.orb.detectAndCompute(img2, None)
+        
+        if des1 is None or des2 is None or len(des1) < self.min_match_count or len(des2) < self.min_match_count:
+            return {
+                'movement_detected': False,
+                'confidence': 0.0,
+                'translation': (0.0, 0.0),
+                'rotation': 0.0,
+                'scale': 1.0
+            }
+        
+        # Match features
+        matches = self.flann.knnMatch(des1, des2, k=2)
+        
+        # Apply Lowe's ratio test
+        good_matches = []
+        for match_pair in matches:
+            if len(match_pair) == 2:
+                m, n = match_pair
+                if m.distance < 0.7 * n.distance:
+                    good_matches.append(m)
+        
+        if len(good_matches) < self.min_match_count:
+            return {
+                'movement_detected': False,
+                'confidence': 0.0,
+                'translation': (0.0, 0.0),
+                'rotation': 0.0,
+                'scale': 1.0
+            }
+        
+        # Extract matched points
+        src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+        dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+        
+        # Find homography
+        homography, mask = cv2.findHomography(
+            src_pts, dst_pts, 
+            cv2.RANSAC, 
+            self.homography_threshold
+        )
+        
+        if homography is None:
+            return {
+                'movement_detected': False,
+                'confidence': 0.0,
+                'translation': (0.0, 0.0),
+                'rotation': 0.0,
+                'scale': 1.0
+            }
+        
+        # Analyze homography matrix
+        return self._analyze_homography(homography, len(good_matches))
