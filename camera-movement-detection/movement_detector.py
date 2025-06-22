@@ -98,3 +98,29 @@ class MovementDetector:
         )
         search_params = dict(checks=50)
         self.flann = cv2.FlannBasedMatcher(index_params, search_params)
+
+    def _frame_differencing(self, img1: np.ndarray, img2: np.ndarray) -> float:
+        """
+        Detect movement using frame differencing.
+        
+        Args:
+            img1: First grayscale image
+            img2: Second grayscale image
+            
+        Returns:
+            Normalized difference score (0-1)
+        """
+        # Compute absolute difference
+        diff = cv2.absdiff(img1, img2)
+        
+        # Apply Gaussian blur to reduce noise
+        diff = cv2.GaussianBlur(diff, (5, 5), 0)
+        
+        # Threshold to binary
+        _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
+        
+        # Calculate percentage of changed pixels
+        changed_pixels = np.sum(thresh > 0)
+        total_pixels = thresh.shape[0] * thresh.shape[1]
+        
+        return changed_pixels / total_pixels
